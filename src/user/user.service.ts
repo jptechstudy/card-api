@@ -18,22 +18,6 @@ export class UserService {
         isActive: true,
         createdAt: true,
         updatedAt: true,
-        userRoles: {
-          select: {
-            roleId: true,
-            isActive: true,
-            createdAt: true,
-            updatedAt: true,
-            role: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-                isActive: true,
-              },
-            },
-          },
-        },
       },
     });
   }

@@ -13,17 +13,13 @@ export class AuthService {
   async signIn(email: string, password: string) {
     const user = await this.prisma.user.findUnique({
       where: { email },
-      include: {
-        userRoles: {
-          include: {
-            role: true,
-          },
-        },
-      },
     });
 
     if (!user || user.password !== password) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException({
+        statusCode: 401,
+        message: 'Invalid credentials',
+      });
     }
 
     const payload = { sub: user.id, email: user.email };
@@ -34,26 +30,19 @@ export class AuthService {
     });
 
     return {
-      accessToken,
-      user: {
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        mobile: user.mobile,
-        avatar: user.avatar,
-        coverImage: user.coverImage,
-        isActive: user.isActive,
-        userRoles: user.userRoles.map((userRole) => ({
-          roleId: userRole.roleId,
-          isActive: userRole.isActive,
-          role: {
-            id: userRole.role.id,
-            name: userRole.role.name,
-            description: userRole.role.description,
-            isActive: userRole.role.isActive,
-          },
-        })),
+      statusCode: 200,
+      data: {
+        accessToken,
+        user: {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          mobile: user.mobile,
+          avatar: user.avatar,
+          coverImage: user.coverImage,
+          isActive: user.isActive,
+        },
       },
     };
   }

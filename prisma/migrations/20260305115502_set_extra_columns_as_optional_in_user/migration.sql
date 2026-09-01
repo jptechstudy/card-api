@@ -1,4 +1,0 @@
--- AlterTable
-ALTER TABLE "User" ALTER COLUMN "avatar" DROP NOT NULL,
-ALTER COLUMN "coverImage" DROP NOT NULL,
-ALTER COLUMN "refreshToken" DROP NOT NULL;

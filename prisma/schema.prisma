@@ -1,12 +1,10 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// ==========================================
+// Prisma Schema for "Card" SaaS Application
+// Database: PostgreSQL
+// ==========================================
 
 generator client {
   provider = "prisma-client-js"
-  // output   = "../generated/prisma"
 }
 
 datasource db {
@@ -14,127 +12,545 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Role {
-  id          Int     @id @default(autoincrement())
-  name        String  @unique @db.VarChar(50)
-  description String? @db.VarChar(255)
+// ==========================================
+// ENUMS
+// ==========================================
 
-  isActive Boolean @default(true)
-
-  createdBy Int?
-  updatedBy Int?
-
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @default(now()) @updatedAt
-  userRoles UserRole[]
-
-  @@index([isActive])
+enum UserRole {
+  SUPER_ADMIN
+  SHOP_OWNER
+  SHOPKEEPER
+  CUSTOMER
 }
 
-model UserRole {
-  userId Int
-  roleId Int
-
-  isActive Boolean @default(true)
-
-  createdBy Int?
-  updatedBy Int?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
-
-  @@id([userId, roleId])
+enum ShopUserType {
+  OWNER
+  SHOPKEEPER
+  CUSTOMER
 }
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum ProductUnit {
+  LITER
+  MILLILITER
+  KG
+  GRAM
+  PIECE
+  PACKET
+  CAN
+  BOX
+  OTHER
+}
+
+enum CardStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  BILLED
+}
+
+enum EntryStatus {
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+enum DepositType {
+  INITIAL_DEPOSIT
+  TOP_UP
+  REFUND
+  BILL_ADJUSTMENT
+}
+
+enum PermissionCode {
+  // Mandatory shopkeeper permission
+  DAILY_ENTRY_CREATE
+  DAILY_ENTRY_READ
+  DAILY_ENTRY_UPDATE
+  DAILY_ENTRY_DELETE
+  
+  // Management permissions
+  CUSTOMER_MANAGE
+  PRODUCT_MANAGE
+  PRICE_UPDATE
+  BILLING_MANAGE
+  DEPOSIT_MANAGE
+  REPORTS_VIEW
+  SETTINGS_MANAGE
+  SHOPKEEPER_MANAGE
+}
+
+// ==========================================
+// 1. CORE USER & IDENTITY
+// ==========================================
 
 model User {
-  id           Int     @id @default(autoincrement())
-  firstName    String
-  lastName     String
-  email        String  @unique
-  mobile       String  @unique
-  password     String
-  avatar       String?
-  coverImage   String?
-  refreshToken String?
+  id           String    @id @default(uuid()) @db.Uuid
+  firstName    String    @db.VarChar(100)
+  lastName     String    @db.VarChar(100)
+  email        String?   @unique @db.VarChar(255)
+  mobile       String    @unique @db.VarChar(20)
+  passwordHash String    @db.VarChar(255)
+  avatarUrl    String?   @db.VarChar(500)
+  systemRole   UserRole  @default(CUSTOMER)
+  isActive     Boolean   @default(true)
 
-  isActive Boolean @default(true)
+  // Audit Fields
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+  createdById  String?   @db.Uuid
+  updatedById  String?   @db.Uuid
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
-  createdBy Int?
-  updatedBy Int?
+  // Self Relations for Audit Tracking
+  createdBy    User?     @relation("UserCreatedBy", fields: [createdById], references: [id])
+  createdUsers User[]    @relation("UserCreatedBy")
+  updatedBy    User?     @relation("UserUpdatedBy", fields: [updatedById], references: [id])
+  updatedUsers User[]    @relation("UserUpdatedBy")
 
-  // Relations
-  userRoles     UserRole[]
-  adminShops    Shop[]                @relation("ShopAdmin")
-  shopOperators ShopOperator[]
-  dailyEntries  DailyEntry[]
-  priceChanges  ProductPriceHistory[] @relation("PriceChangedBy")
+  // Multi-Tenant Relations
+  shopMemberships       ShopUser[]
+  customerProfiles      CustomerShopProfile[]
+  recordedDailyEntries  DailyEntry[]          @relation("DailyEntryRecordedBy")
+  recordedPriceChanges  ProductPriceHistory[] @relation("PriceChangedBy")
+  recordedDeposits      CustomerDeposit[]     @relation("DepositRecordedBy")
+  generatedBills        MonthlyBill[]         @relation("BillGeneratedBy")
+  auditLogs             AuditLog[]            @relation("AuditUser")
+
+  @@index([mobile])
+  @@index([email])
+  @@index([deletedAt])
+  @@map("users")
 }
+
+// ==========================================
+// 2. SHOP & MULTI-TENANCY
+// ==========================================
 
 model Shop {
-  id      Int    @id @default(autoincrement())
-  name    String
-  adminId Int
+  id           String    @id @default(uuid()) @db.Uuid
+  name         String    @db.VarChar(150)
+  code         String?   @unique @db.VarChar(50)
+  phone        String?   @db.VarChar(20)
+  address      String?   @db.Text
+  city         String?   @db.VarChar(100)
+  state        String?   @db.VarChar(100)
+  pincode      String?   @db.VarChar(20)
+  logoUrl      String?   @db.VarChar(500)
+  isActive     Boolean   @default(true)
+
+  // Audit Fields
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+  createdById  String?   @db.Uuid
+  updatedById  String?   @db.Uuid
 
   // Relations
-  admin     User           @relation("ShopAdmin", fields: [adminId], references: [id])
-  products  Product[]
-  operators ShopOperator[]
-  entries   DailyEntry[]
+  memberships      ShopUser[]
+  roles            Role[]
+  products         Product[]
+  customerProfiles CustomerShopProfile[]
+  monthlyCards     MonthlyCard[]
+  dailyEntries     DailyEntry[]
+  monthlyBills     MonthlyBill[]
+  deposits         CustomerDeposit[]
+  auditLogs        AuditLog[]
+
+  @@index([name])
+  @@index([city])
+  @@index([deletedAt])
+  @@map("shops")
 }
 
-model ShopOperator {
-  shopId Int
-  userId Int
+// Junction Table: User <-> Shop (N:M with Role contextualization)
+model ShopUser {
+  id           String       @id @default(uuid()) @db.Uuid
+  shopId       String       @db.Uuid
+  userId       String       @db.Uuid
+  userType     ShopUserType
+  isActive     Boolean      @default(true)
 
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Audit Fields
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+  createdById  String?      @db.Uuid
 
-  @@id([shopId, userId])
+  // Relations
+  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roles        ShopUserRole[]
+  permissions  ShopUserPermission[]
+
+  @@unique([shopId, userId, userType])
+  @@index([shopId, userId])
+  @@index([userId])
+  @@index([deletedAt])
+  @@map("shop_users")
 }
+
+// ==========================================
+// 3. RBAC (ROLE-BASED ACCESS CONTROL)
+// ==========================================
+
+model Role {
+  id           String       @id @default(uuid()) @db.Uuid
+  shopId       String?      @db.Uuid // null for global default roles
+  name         String       @db.VarChar(100)
+  description  String?      @db.VarChar(255)
+  isSystem     Boolean      @default(false)
+
+  // Audit Fields
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  // Relations
+  shop         Shop?        @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  permissions  RolePermission[]
+  shopUsers    ShopUserRole[]
+
+  @@unique([shopId, name])
+  @@index([shopId])
+  @@map("roles")
+}
+
+model Permission {
+  id           String         @id @default(uuid()) @db.Uuid
+  code         PermissionCode @unique
+  name         String         @db.VarChar(100)
+  description  String?        @db.VarChar(255)
+  category     String         @db.VarChar(50)
+
+  // Relations
+  roles        RolePermission[]
+  shopUsers    ShopUserPermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid()) @db.Uuid
+  roleId       String     @db.Uuid
+  permissionId String     @db.Uuid
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@map("role_permissions")
+}
+
+model ShopUserRole {
+  id         String   @id @default(uuid()) @db.Uuid
+  shopUserId String   @db.Uuid
+  roleId     String   @db.Uuid
+
+  shopUser   ShopUser @relation(fields: [shopUserId], references: [id], onDelete: Cascade)
+  role       Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([shopUserId, roleId])
+  @@map("shop_user_roles")
+}
+
+model ShopUserPermission {
+  id           String     @id @default(uuid()) @db.Uuid
+  shopUserId   String     @db.Uuid
+  permissionId String     @db.Uuid
+  isGranted    Boolean    @default(true) // Can explicitly grant or revoke overriding role
+
+  shopUser     ShopUser   @relation(fields: [shopUserId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([shopUserId, permissionId])
+  @@map("shop_user_permissions")
+}
+
+// ==========================================
+// 4. CUSTOMER PROFILE (SHOP-SPECIFIC)
+// ==========================================
+
+model CustomerShopProfile {
+  id             String         @id @default(uuid()) @db.Uuid
+  shopId         String         @db.Uuid
+  customerId     String         @db.Uuid // Refers to User.id
+  customerCode   String         @db.VarChar(50) // Shop-specific card/account number
+  depositBalance Decimal        @default(0) @db.Decimal(12, 2)
+  creditLimit    Decimal        @default(0) @db.Decimal(12, 2)
+  currentBalance Decimal        @default(0) @db.Decimal(12, 2) // Unbilled outstanding
+  status         CustomerStatus @default(ACTIVE)
+  joinedAt       DateTime       @default(now())
+  notes          String?        @db.Text
+
+  // Audit Fields
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  shop           Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customer       User           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  monthlyCards   MonthlyCard[]
+  dailyEntries   DailyEntry[]
+  monthlyBills   MonthlyBill[]
+  deposits       CustomerDeposit[]
+
+  @@unique([shopId, customerId])
+  @@unique([shopId, customerCode])
+  @@index([shopId, status])
+  @@index([customerId])
+  @@index([deletedAt])
+  @@map("customer_shop_profiles")
+}
+
+// ==========================================
+// 5. PRODUCT & PRICE HISTORY
+// ==========================================
 
 model Product {
-  id     Int    @id @default(autoincrement())
-  name   String
-  price  Float // current active price
-  shopId Int
+  id           String       @id @default(uuid()) @db.Uuid
+  shopId       String       @db.Uuid
+  name         String       @db.VarChar(150)
+  code         String?      @db.VarChar(50)
+  description  String?      @db.Text
+  unit         ProductUnit  @default(PIECE)
+  currentPrice Decimal      @db.Decimal(10, 2)
+  isActive     Boolean      @default(true)
 
-  shop      Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  entries   DailyEntry[]
-  priceLogs ProductPriceHistory[]
+  // Audit Fields
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+  createdById  String?      @db.Uuid
+
+  // Relations
+  shop            Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  priceHistory    ProductPriceHistory[]
+  dailyEntryItems DailyEntryItem[]
+
+  @@unique([shopId, name])
+  @@index([shopId, isActive])
+  @@index([deletedAt])
+  @@map("products")
 }
 
 model ProductPriceHistory {
-  id        Int      @id @default(autoincrement())
-  productId Int
-  oldPrice  Float
-  newPrice  Float
-  changedAt DateTime @default(now())
-  changedBy Int
+  id            String    @id @default(uuid()) @db.Uuid
+  productId     String    @db.Uuid
+  price         Decimal   @db.Decimal(10, 2)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  reason        String?   @db.VarChar(255)
+  createdAt     DateTime  @default(now())
+  createdById   String?   @db.Uuid
 
-  product       Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  changedByUser User    @relation("PriceChangedBy", fields: [changedBy], references: [id])
+  // Relations
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdBy     User?     @relation("PriceChangedBy", fields: [createdById], references: [id])
 
-  @@index([productId])
+  @@index([productId, effectiveFrom])
+  @@map("product_price_histories")
 }
 
+// ==========================================
+// 6. MONTHLY CARD SYSTEM
+// ==========================================
+
+model MonthlyCard {
+  id                    String              @id @default(uuid()) @db.Uuid
+  shopId                String              @db.Uuid
+  customerShopProfileId String              @db.Uuid
+  year                  Int                 @db.SmallInt
+  month                 Int                 @db.SmallInt // 1 - 12
+  status                CardStatus          @default(ACTIVE)
+  openingBalance        Decimal             @default(0) @db.Decimal(12, 2)
+  totalAmount           Decimal             @default(0) @db.Decimal(12, 2)
+  paidAmount            Decimal             @default(0) @db.Decimal(12, 2)
+  closingBalance        Decimal             @default(0) @db.Decimal(12, 2)
+  notes                 String?             @db.Text
+
+  // Audit Fields
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  deletedAt             DateTime?
+
+  // Relations
+  shop                  Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customerProfile       CustomerShopProfile @relation(fields: [customerShopProfileId], references: [id], onDelete: Cascade)
+  dailyEntries          DailyEntry[]
+  bill                  MonthlyBill?
+
+  @@unique([shopId, customerShopProfileId, year, month])
+  @@index([shopId, year, month])
+  @@index([customerShopProfileId, year, month])
+  @@index([deletedAt])
+  @@map("monthly_cards")
+}
+
+// ==========================================
+// 7. DAILY ENTRY (HEADER & DETAILS)
+// ==========================================
+
 model DailyEntry {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  shopId    Int
-  productId Int
-  quantity  Float
-  price     Float // snapshot price at time of entry
-  date      DateTime
+  id                    String              @id @default(uuid()) @db.Uuid
+  shopId                String              @db.Uuid
+  customerShopProfileId String              @db.Uuid
+  monthlyCardId         String              @db.Uuid
+  recordedById          String              @db.Uuid // Shopkeeper / Owner User ID
+  entryDate             DateTime            @db.Date // YYYY-MM-DD
+  totalAmount           Decimal             @default(0) @db.Decimal(10, 2)
+  notes                 String?             @db.Text
+  status                EntryStatus         @default(COMPLETED)
 
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shop    Shop    @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Audit Fields
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  deletedAt             DateTime?
 
-  @@index([userId, shopId])
-  @@index([date])
+  // Relations
+  shop                  Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customerProfile       CustomerShopProfile @relation(fields: [customerShopProfileId], references: [id], onDelete: Cascade)
+  monthlyCard           MonthlyCard         @relation(fields: [monthlyCardId], references: [id], onDelete: Cascade)
+  recordedBy            User                @relation("DailyEntryRecordedBy", fields: [recordedById], references: [id])
+  items                 DailyEntryItem[]
+
+  @@unique([customerShopProfileId, entryDate, deletedAt])
+  @@index([shopId, entryDate])
+  @@index([customerShopProfileId, entryDate])
+  @@index([monthlyCardId])
+  @@index([deletedAt])
+  @@map("daily_entries")
+}
+
+model DailyEntryItem {
+  id                  String      @id @default(uuid()) @db.Uuid
+  dailyEntryId        String      @db.Uuid
+  productId           String      @db.Uuid
+  productNameSnapshot String      @db.VarChar(150) // Snapshot product name
+  unitSnapshot        ProductUnit // Snapshot unit of measure
+  quantity            Decimal     @db.Decimal(10, 3)
+  unitPrice           Decimal     @db.Decimal(10, 2) // Price Snapshot at entry time
+  totalAmount         Decimal     @db.Decimal(10, 2) // quantity * unitPrice snapshot
+
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  // Relations
+  dailyEntry          DailyEntry  @relation(fields: [dailyEntryId], references: [id], onDelete: Cascade)
+  product             Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([dailyEntryId])
+  @@index([productId])
+  @@map("daily_entry_items")
+}
+
+// ==========================================
+// 8. MONTHLY BILLING
+// ==========================================
+
+model MonthlyBill {
+  id                    String              @id @default(uuid()) @db.Uuid
+  shopId                String              @db.Uuid
+  customerShopProfileId String              @db.Uuid
+  monthlyCardId         String              @unique @db.Uuid
+  billNumber            String              @unique @db.VarChar(50)
+  billingPeriodStart    DateTime            @db.Date
+  billingPeriodEnd      DateTime            @db.Date
+  totalAmount           Decimal             @db.Decimal(12, 2)
+  discountAmount        Decimal             @default(0) @db.Decimal(12, 2)
+  taxAmount             Decimal             @default(0) @db.Decimal(12, 2)
+  netAmount             Decimal             @db.Decimal(12, 2)
+  previousBalance       Decimal             @default(0) @db.Decimal(12, 2)
+  totalPayable          Decimal             @db.Decimal(12, 2)
+  paidAmount            Decimal             @default(0) @db.Decimal(12, 2)
+  dueAmount             Decimal             @db.Decimal(12, 2)
+  paymentStatus         PaymentStatus       @default(UNPAID)
+  paidDate              DateTime?
+  remarks               String?             @db.Text
+  generatedById         String              @db.Uuid
+
+  // Audit Fields
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  deletedAt             DateTime?
+
+  // Relations
+  shop                  Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customerProfile       CustomerShopProfile @relation(fields: [customerShopProfileId], references: [id], onDelete: Cascade)
+  monthlyCard           MonthlyCard         @relation(fields: [monthlyCardId], references: [id], onDelete: Cascade)
+  generatedBy           User                @relation("BillGeneratedBy", fields: [generatedById], references: [id])
+
+  @@index([shopId, paymentStatus])
+  @@index([customerShopProfileId, paymentStatus])
+  @@index([deletedAt])
+  @@map("monthly_bills")
+}
+
+// ==========================================
+// 9. CUSTOMER DEPOSITS
+// ==========================================
+
+model CustomerDeposit {
+  id                    String              @id @default(uuid()) @db.Uuid
+  shopId                String              @db.Uuid
+  customerShopProfileId String              @db.Uuid
+  amount                Decimal             @db.Decimal(12, 2)
+  type                  DepositType         @default(INITIAL_DEPOSIT)
+  transactionDate       DateTime            @default(now())
+  receiptNumber         String?             @db.VarChar(50)
+  remarks               String?             @db.Text
+  recordedById          String              @db.Uuid
+
+  // Audit Fields
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  deletedAt             DateTime?
+
+  // Relations
+  shop                  Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customerProfile       CustomerShopProfile @relation(fields: [customerShopProfileId], references: [id], onDelete: Cascade)
+  recordedBy            User                @relation("DepositRecordedBy", fields: [recordedById], references: [id])
+
+  @@index([shopId, customerShopProfileId])
+  @@index([transactionDate])
+  @@index([deletedAt])
+  @@map("customer_deposits")
+}
+
+// ==========================================
+// 10. SYSTEM AUDIT LOGGING
+// ==========================================
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  shopId     String?  @db.Uuid
+  userId     String?  @db.Uuid
+  action     String   @db.VarChar(100) // e.g. PRICE_CHANGED, DAILY_ENTRY_CANCELLED
+  entity     String   @db.VarChar(100) // e.g. Product, DailyEntry
+  entityId   String   @db.VarChar(100)
+  oldValues  Json?
+  newValues  Json?
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  // Relations
+  shop       Shop?    @relation(fields: [shopId], references: [id], onDelete: SetNull)
+  user       User?    @relation("AuditUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
 }
