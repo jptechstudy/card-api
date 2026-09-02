@@ -15,7 +15,7 @@ export class AuthService {
       where: { email },
     });
 
-    if (!user || user.password !== password) {
+    if (!user || user.passwordHash !== password) {
       throw new UnauthorizedException({
         statusCode: 401,
         message: 'Invalid credentials',
@@ -39,8 +39,8 @@ export class AuthService {
           lastName: user.lastName,
           email: user.email,
           mobile: user.mobile,
-          avatar: user.avatar,
-          coverImage: user.coverImage,
+          avatarUrl: user.avatarUrl,
+          systemRole: user.systemRole,
           isActive: user.isActive,
         },
       },

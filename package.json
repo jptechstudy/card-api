@@ -24,7 +24,11 @@
     "db:studio": "prisma studio",
     "db:gen": "prisma generate",
     "db:deploy": "prisma migrate deploy",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "db:seed": "prisma db seed"
+  },
+  "prisma": {
+    "seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
