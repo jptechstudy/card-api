@@ -9,9 +9,11 @@ import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
 import { IS_PUBLIC_KEY } from './public.decorator';
 
-type JwtPayload = {
-  sub: number;
-  email: string;
+export type JwtPayload = {
+  sub: string;
+  email?: string;
+  mobile?: string;
+  systemRole?: string;
 };
 
 @Injectable()

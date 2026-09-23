@@ -325,7 +325,9 @@ model Product {
   name         String       @db.VarChar(150)
   code         String?      @db.VarChar(50)
   description  String?      @db.Text
-  unit         ProductUnit  @default(PIECE)
+  volume       String?      @db.VarChar(50)
+  unit         String       @default("Piece") @db.VarChar(50)
+  unitCode     String?      @db.VarChar(20)
   currentPrice Decimal      @db.Decimal(10, 2)
   isActive     Boolean      @default(true)
 
@@ -426,7 +428,6 @@ model DailyEntry {
   recordedBy            User                @relation("DailyEntryRecordedBy", fields: [recordedById], references: [id])
   items                 DailyEntryItem[]
 
-  @@unique([customerShopProfileId, entryDate, deletedAt])
   @@index([shopId, entryDate])
   @@index([customerShopProfileId, entryDate])
   @@index([monthlyCardId])
@@ -439,7 +440,7 @@ model DailyEntryItem {
   dailyEntryId        String      @db.Uuid
   productId           String      @db.Uuid
   productNameSnapshot String      @db.VarChar(150) // Snapshot product name
-  unitSnapshot        ProductUnit // Snapshot unit of measure
+  unitSnapshot        String      @default("Piece") @db.VarChar(50) // Snapshot unit of measure
   quantity            Decimal     @db.Decimal(10, 3)
   unitPrice           Decimal     @db.Decimal(10, 2) // Price Snapshot at entry time
   totalAmount         Decimal     @db.Decimal(10, 2) // quantity * unitPrice snapshot

@@ -1,4 +1,6 @@
 export class LoginDto {
-  email!: string;
+  email?: string;
+  mobile?: string;
+  emailOrMobile?: string;
   password!: string;
 }
