@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { PermissionCode, Prisma } from '@prisma/client';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -69,6 +69,9 @@ export class ProductService {
         { name: { contains: q, mode: 'insensitive' } },
         { code: { contains: q, mode: 'insensitive' } },
         { description: { contains: q, mode: 'insensitive' } },
+        { volume: { contains: q, mode: 'insensitive' } },
+        { unit: { contains: q, mode: 'insensitive' } },
+        { unitCode: { contains: q, mode: 'insensitive' } },
       ];
     }
 
@@ -142,33 +145,57 @@ export class ProductService {
       throw new BadRequestException('Product name is required');
     }
 
-    // Check duplicate name in shop
+    if (
+      dto.currentPrice === undefined ||
+      dto.currentPrice === null ||
+      isNaN(Number(dto.currentPrice)) ||
+      Number(dto.currentPrice) < 0
+    ) {
+      throw new BadRequestException('A valid current price is required');
+    }
+
+    const normalizedName = dto.name.trim();
+    const normalizedVolume =
+      dto.volume !== undefined && dto.volume !== null && String(dto.volume).trim() !== ''
+        ? String(dto.volume).trim()
+        : null;
+    const resolved = resolveUnitAndCode(dto.unit, dto.unitCode);
+    const normalizedPrice = Number(dto.currentPrice);
+
+    // Check duplicate in shop: name + volume + unit + price
     const existing = await this.prisma.product.findFirst({
       where: {
         shopId,
-        name: { equals: dto.name.trim(), mode: 'insensitive' },
+        name: { equals: normalizedName, mode: 'insensitive' },
+        ...(normalizedVolume
+          ? { volume: { equals: normalizedVolume, mode: 'insensitive' } }
+          : { OR: [{ volume: null }, { volume: '' }] }),
+        unit: { equals: resolved.unit, mode: 'insensitive' },
+        currentPrice: normalizedPrice,
         deletedAt: null,
       },
     });
 
     if (existing) {
-      throw new BadRequestException(`A product named "${dto.name}" already exists in this shop`);
+      const volText = normalizedVolume ? `${normalizedVolume} ${resolved.unit}` : resolved.unit;
+      throw new BadRequestException(
+        `A product named "${normalizedName}" (${volText}) at ₹${normalizedPrice} already exists in this shop`,
+      );
     }
 
     const effectiveDate = new Date();
-    const resolved = resolveUnitAndCode(dto.unit, dto.unitCode);
 
     const created = await this.prisma.$transaction(async tx => {
       const prod = await tx.product.create({
         data: {
           shopId,
-          name: dto.name.trim(),
+          name: normalizedName,
           code: dto.code?.trim() || null,
           description: dto.description?.trim() || null,
-          volume: dto.volume ? String(dto.volume).trim() : null,
+          volume: normalizedVolume,
           unit: resolved.unit,
           unitCode: resolved.unitCode,
-          currentPrice: dto.currentPrice,
+          currentPrice: normalizedPrice,
           createdById: userId,
         },
       });
@@ -176,7 +203,7 @@ export class ProductService {
       const history = await tx.productPriceHistory.create({
         data: {
           productId: prod.id,
-          price: dto.currentPrice,
+          price: normalizedPrice,
           effectiveFrom: effectiveDate,
           reason: 'Initial catalog pricing',
           createdById: userId,
@@ -218,42 +245,92 @@ export class ProductService {
       throw new NotFoundException('Product not found');
     }
 
-    if (dto.name && dto.name.trim() !== product.name) {
-      const duplicate = await this.prisma.product.findFirst({
-        where: {
-          shopId,
-          name: { equals: dto.name.trim(), mode: 'insensitive' },
-          id: { not: productId },
-          deletedAt: null,
-        },
-      });
-      if (duplicate) {
-        throw new BadRequestException(`A product named "${dto.name}" already exists`);
-      }
+    const targetName = dto.name !== undefined ? dto.name.trim() : product.name;
+    if (!targetName) {
+      throw new BadRequestException('Product name cannot be empty');
     }
 
-    let resolvedUnit: string | undefined = undefined;
-    let resolvedCode: string | undefined = undefined;
+    const targetVolume =
+      dto.volume !== undefined
+        ? dto.volume !== null && String(dto.volume).trim() !== ''
+          ? String(dto.volume).trim()
+          : null
+        : product.volume
+        ? String(product.volume).trim()
+        : null;
+
+    let targetUnit = product.unit;
+    let targetUnitCode = product.unitCode;
     if (dto.unit !== undefined || dto.unitCode !== undefined) {
       const resolved = resolveUnitAndCode(
         dto.unit ?? product.unit,
         dto.unitCode ?? (product as any).unitCode ?? undefined,
       );
-      resolvedUnit = resolved.unit;
-      resolvedCode = resolved.unitCode;
+      targetUnit = resolved.unit;
+      targetUnitCode = resolved.unitCode;
     }
 
-    const updated = await this.prisma.product.update({
-      where: { id: productId },
-      data: {
-        name: dto.name?.trim() ?? undefined,
-        code: dto.code !== undefined ? dto.code?.trim() || null : undefined,
-        description: dto.description !== undefined ? dto.description?.trim() || null : undefined,
-        volume: dto.volume !== undefined ? (dto.volume ? String(dto.volume).trim() : null) : undefined,
-        unit: resolvedUnit ?? undefined,
-        unitCode: resolvedCode ?? undefined,
-        isActive: dto.isActive ?? undefined,
+    const targetPrice =
+      dto.currentPrice !== undefined && dto.currentPrice !== null
+        ? Number(dto.currentPrice)
+        : Number(product.currentPrice);
+
+    if (isNaN(targetPrice) || targetPrice < 0) {
+      throw new BadRequestException('A valid price is required');
+    }
+
+    // Check duplicate against other active products in this shop: name + volume + unit + price
+    const duplicate = await this.prisma.product.findFirst({
+      where: {
+        shopId,
+        id: { not: productId },
+        name: { equals: targetName, mode: 'insensitive' },
+        ...(targetVolume
+          ? { volume: { equals: targetVolume, mode: 'insensitive' } }
+          : { OR: [{ volume: null }, { volume: '' }] }),
+        unit: { equals: targetUnit, mode: 'insensitive' },
+        currentPrice: targetPrice,
+        deletedAt: null,
       },
+    });
+
+    if (duplicate) {
+      const volText = targetVolume ? `${targetVolume} ${targetUnit}` : targetUnit;
+      throw new BadRequestException(
+        `A product named "${targetName}" (${volText}) at ₹${targetPrice} already exists`,
+      );
+    }
+
+    const priceChanged = targetPrice !== Number(product.currentPrice);
+
+    const updated = await this.prisma.$transaction(async tx => {
+      const prod = await tx.product.update({
+        where: { id: productId },
+        data: {
+          name: dto.name !== undefined ? targetName : undefined,
+          code: dto.code !== undefined ? dto.code?.trim() || null : undefined,
+          description: dto.description !== undefined ? dto.description?.trim() || null : undefined,
+          volume: dto.volume !== undefined ? targetVolume : undefined,
+          unit: targetUnit,
+          unitCode: targetUnitCode,
+          currentPrice: priceChanged ? targetPrice : undefined,
+          isActive: dto.isActive ?? undefined,
+        },
+      });
+
+      if (priceChanged) {
+        await tx.productPriceHistory.create({
+          data: {
+            productId,
+            price: targetPrice,
+            effectiveFrom: new Date(),
+            reason: 'Catalog price updated via product edit',
+            createdById: userId,
+          },
+        });
+      }
+
+      return prod;
     });
 
     return {

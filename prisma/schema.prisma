@@ -342,7 +342,8 @@ model Product {
   priceHistory    ProductPriceHistory[]
   dailyEntryItems DailyEntryItem[]
 
-  @@unique([shopId, name])
+  @@index([shopId, name])
+  @@index([shopId, name, volume, unit, currentPrice])
   @@index([shopId, isActive])
   @@index([deletedAt])
   @@map("products")
